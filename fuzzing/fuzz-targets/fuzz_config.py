@@ -30,6 +30,22 @@ if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
 with atheris.instrument_imports():
     import git
 
+def handle_fuzz_exception(e):
+    """Handle all expected exceptions from git_config.read()."""
+    # Expected config parsing-related errors → reject input.
+    if isinstance(e, (MissingSectionHeaderError, ParsingError, UnicodeDecodeError)):
+        return -1
+
+    # Special-case ValueError coming from embedded null bytes.
+    if isinstance(e, ValueError):
+        if "embedded null byte" in str(e):
+            return -1
+        # Any other ValueError is unexpected → re-raise.
+        raise e
+
+    # Any other exception type is unexpected → re-raise.
+    raise e
+
 
 def TestOneInput(data):
     sio = io.BytesIO(data)
@@ -37,15 +53,8 @@ def TestOneInput(data):
     git_config = git.GitConfigParser(sio)
     try:
         git_config.read()
-    except (MissingSectionHeaderError, ParsingError, UnicodeDecodeError):
-        return -1  # Reject inputs raising expected exceptions
-    except ValueError as e:
-        if "embedded null byte" in str(e):
-            # The `os.path.expanduser` function, which does not accept strings
-            # containing null bytes might raise this.
-            return -1
-        else:
-            raise e  # Raise unanticipated exceptions as they might be bugs
+    except Exception as e:
+        return handle_fuzz_exception(e)
 
 
 def main():
